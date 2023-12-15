@@ -1,0 +1,1 @@
+{"ResourceProperties": {"ClusterName": "redis-eks-cluster", "IP": "192.168.1.1", "PodName": "redis-leader-0"}}

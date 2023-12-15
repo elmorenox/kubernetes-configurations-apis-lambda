@@ -14,7 +14,6 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 
-import json
 import logging
 import os
 import subprocess
@@ -29,9 +28,11 @@ logger.setLevel(logging.INFO)
 
 # Jinja configs
 templateLoader = jinja2.FileSystemLoader(searchpath="./")
-templateEnv = jinja2.Environment(autoescape=select_autoescape(default_for_string=True, default=True),
+templateEnv = jinja2.Environment(
+    autoescape=select_autoescape(default_for_string=True, default=True),
     loader=templateLoader,
-    trim_blocks=True)
+    trim_blocks=True,
+)
 
 
 def get_stdout(output):
@@ -44,104 +45,81 @@ def get_stdout(output):
     if output.returncode == 0:
         command_output = output.stdout
     else:
-        raise Exception(f'Command failed for - stderr: {output.stderr} - '
-                        f'returncode: {output.returncode}')
+        raise Exception(
+            f"Command failed for - stderr: {output.stderr} - "
+            f"returncode: {output.returncode}"
+        )
 
     return command_output
 
 
-def create_kubeconfig(cluster_name):
+def create_kubeconfig(region, cluster_name):
     """
     Updates the kubernetes context on the `kubeconfig` file.
     :param cluster_name: the name of the EKS cluster
     """
-    logger.info('Create kube config file.')
-    configure_cli = f'aws eks update-kubeconfig --name {cluster_name}'
+    logger.info("Create kube config file.")
+    configure_cli = f"aws eks update-kubeconfig --region {region} --name {cluster_name}"
     output = subprocess.run(
-        f'{configure_cli}',
-        encoding='utf-8',
+        f"{configure_cli}",
+        encoding="utf-8",
         capture_output=True,
         shell=True,
-        check=False
+        check=False,
     )
     if output.returncode != 0:
-        raise RuntimeError(f'Failed to create kube config file {output.stderr}.')
-    
-    logger.info('Successfully created kubeconfig file.')
+        raise RuntimeError(f"Failed to create kube config file {output.stderr}.")
+
+    logger.info("Successfully created kubeconfig file.")
 
 
-def update_identity_mappings(event, action):
+def update_config_map(ip):
     """
-    Uses the `action` parameter to run an `kubectl apply` or
-    `kubectl delete` command.
-    :param event: the CFN event
-    :param action: `apply` to create/update the config map, or `delete` to delete it
+    Updates the `redis.conf` in the ConfigMap with the new IP.
+    :param ip: the new IP
     """
-
-    template_file = "templates/aws-auth.yaml.jinja"
+    template_file = "templates/redis-config.yaml.jinja"
     template = templateEnv.get_template(template_file)
-    aws_auth = template.render(roleMappings=event["ResourceProperties"]["RoleMappings"])
-    command_base = 'cat <<EOF | kubectl -n kube-system apply -f -\n{0}\nEOF'
-
-    commands = {
-        "apply": command_base.format(aws_auth),
-        "delete": "kubectl -n kube-system delete configmap aws-auth"
-    }
-
-    logger.info('Updating identity mappings...')
-    logger.info("rendered template: %s", aws_auth)
+    config = template.render(ip=ip)
+    command = f"cat <<EOF | kubectl apply -f -\n{config}\nEOF"
     output = subprocess.run(
-        args=commands[action],
-        encoding='utf-8',
-        capture_output=True,
-        shell=True,
-        check=False
+        args=command, encoding="utf-8", capture_output=True, shell=True, check=False
+    )
+    logger.info("command output: %s", output)
+    if output.returncode != 0:
+        raise RuntimeError(f"Failed to update ConfigMap: {output.stderr}.")
+    logger.info("Successfully updated ConfigMap.")
+
+
+def delete_pod(pod_name):
+    """
+    Deletes a pod.
+    :param pod_name: the name of the pod to delete
+    """
+    command = f"kubectl delete pod {pod_name}"
+    output = subprocess.run(
+        args=command, encoding="utf-8", capture_output=True, shell=True, check=False
     )
     if output.returncode != 0:
-        if action == 'delete' and "\"aws-auth\" not found" in output.stderr:
-            logger.error('aws-auth config map not found during delete operation. Ignoring error...')
-            logger.error('output: %s', output.stdout)
-            return
-        else:
-            raise RuntimeError(f'Failed to update identity mappings: {output.stderr}.')
+        raise RuntimeError(f"Failed to delete pod: {output.stderr}.")
 
-    logger.info('Successfully updated identity mappings.')
-    command_output = get_stdout(output)
-    logger.info('output: %s', command_output)
-    return
+    logger.info("Successfully deleted pod.")
 
 
-def get_response_data():
+def get_pod_ip(pod_name):
     """
-    Runs `kubectl get cm aws-auth` to use it as the cfn resource data.
-    :return: the contents of the aws-auth config map's `data` field
+    Gets the IP of a pod.
+    :param pod_name: the name of the pod to get the IP
     """
-    command = "kubectl -n kube-system get configmap aws-auth -o json"
+    command = f"kubectl get pod {pod_name} -o=jsonpath='{{.status.podIP}}'"
     output = subprocess.run(
-        args=command,
-        encoding='utf-8',
-        capture_output=True,
-        shell=True,
-        check=False
+        args=command, encoding="utf-8", capture_output=True, shell=True, check=False
     )
     if output.returncode != 0:
-        raise RuntimeError(f'Failed to update identity mappings: {output.stderr}.')
+        raise RuntimeError(f"Failed to get pod IP: {output.stderr}.")
 
-    stdout = get_stdout(output)
-
-    return json.loads(stdout)['data']
-
-
-def get_resource_id(event):
-    """
-    Returns the CFN Resource ID with format <cluster_name>_aws-auth.
-    :param event: the CFN event
-    :return: the CFN resource id
-    """
-    cluster_name = event["ResourceProperties"]['ClusterName']
-    resource_id = cluster_name + "_aws-auth"
-
-    return resource_id
+    logger.info("Successfully got pod IP.")
+    return output.stdout
 
 
 def handler(event, _):
@@ -150,39 +128,45 @@ def handler(event, _):
     :param event: the CFN event
     :param context: the lambda context
     """
+    kube_config_path = "/tmp/kubeconfig"
+    os.environ["KUBECONFIG"] = kube_config_path
 
-    kube_config_path = '/tmp/kubeconfig'
-    os.environ['KUBECONFIG'] = kube_config_path
+    ip = event["ResourceProperties"].get("IP")
 
-    cluster_name = event["ResourceProperties"]['ClusterName']
+    if not ip:
+        try:
+            create_kubeconfig("us-east-1", "cluster01")
+        except Exception:
+            logger.error("Failed to create kubeconfig file")
+            sys.exit(1)
 
-    try:
-        create_kubeconfig(cluster_name)
-        if event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
-            create(event)
-        elif event['RequestType'] == 'Delete':
-            delete(event)
-    except Exception:
-        logger.error('Signaling failure')
-        sys.exit(1)
+        try:
+            ip = get_pod_ip("redis-leader-0")
+        except Exception:
+            logger.error("Failed to get pod IP")
+            sys.exit(1)
+
+        try:
+            create_kubeconfig("us-west-1", "cluster02")
+        except Exception:
+            logger.error("Failed to create kubeconfig file")
+            sys.exit(1)
+
+        try:
+            update_config_map(ip)
+            delete_pod("redis-follower-0")
+        except Exception:
+            logger.error("Signaling failure")
+            sys.exit(1)
     else:
-        sys.exit(0)
+        try:
+            create_kubeconfig("us-west-1", "cluster02")
+        except Exception:
+            logger.error("Failed to create kubeconfig file")
+            sys.exit(1)
 
-
-def create(event):
-    """
-    Handles the `create` event.
-    :param event: the CFN event
-    :param context: the lambda context
-    """
-    logger.info(f"Creating identity mapping... event: {event}")
-    update_identity_mappings(event=event, action="apply")
-
-def delete(event):
-    """
-    Handles the `delete` event.
-    :param event: the CFN event
-    :param context: the lambda context
-    """
-    logger.info(f"Deleting identity mapping... event: {event}")
-    update_identity_mappings(event=event, action="delete")
+        try:
+            update_config_map(ip)
+        except Exception:
+            logger.error("Signaling failure")
+            sys.exit(1)

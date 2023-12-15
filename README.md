@@ -1,4 +1,8 @@
-*This sample, non-production-ready template describes managing EKS with Lambda functions.
+*cloned and adapted from https://github.com/aws-samples/kubernetes-configurations-apis-lambda*
+
+################################
+
+This sample, non-production-ready template describes managing EKS with Lambda functions.
 (c) 2021 Amazon Web Services, Inc. or its
 affiliates. All Rights Reserved. This AWS Content is provided subject to the
 terms of the AWS Customer Agreement available at
@@ -136,14 +140,16 @@ This repository enables users to call Kubernetes APIs to create and manage resou
 ```
 
 #### Additional Lambda Role Permissions
+
 The Lambda role needs the following permissions:
+
 1. Create CloudWatch Logs
 2. The following permissions below
 
 ```json
 {
     "Version": "2012-10-17",
-    "Statement": [        
+    "Statement": [      
         {
             "Sid": "EKSSpecific",
             "Effect": "Allow",
@@ -164,37 +170,48 @@ The Lambda role needs the following permissions:
 ## Implementation Steps:
 
 1a. Create Lambda role
+
 ```bash
 aws iam create-role \
 --role-name <ROLE-NAME> \
 --assume-role-policy-document file://iam/lambda-trust-policy.json
 ```
+
 1b. Create IAM policy
+
 ```bash
 aws iam create-policy \
 --policy-name <ROLE-NAME>-policy \
 --policy-document file://iam/lambda-role-permission.json
 ```
+
 add basic lambda execution role:
+
 ```bash
 aws iam attach-role-policy \
 --role-name <ROLE-NAME> \
 --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 ```
+
 2. Create AWS ECR
+
 ```bash
 aws ecr create-repository \
 --repository-name <ECR-NAME>
 ```
+
 and authorization to push Docker images to ECR:
+
 ```bash
 aws ecr get-login-password \
 --region <REGION> | docker login \
 --username AWS \
 --password-stdin <ACCOUND-ID>.dkr.ecr.<REGION>.amazonaws.com
 ```
+
 3a. Create Elastic Kubernetes Cluster:
-```bash 
+
+```bash
 eksctl create cluster \
 --name demo-eks-cluster \
 --version 1.20 \
@@ -204,11 +221,15 @@ eksctl create cluster \
 --region <REGION> \
 --enable-ssm
 ```
+
 3b. Add Lambda role to EKS configmap
+
 ```bash
 kubectl edit -n kube-system configmap/aws-auth
 ```
+
 3c. Add the following
+
 ```bash
 - userarn: <LAMBDA-ROLE-ARN>
     username: admin
@@ -225,6 +246,7 @@ docker push <ECR-URI>:latest
 ```
 
 5. Create Lambda container function:
+
 ```bash
 aws lambda create-function \
 --function-name <FUNCTION-NAME> \
@@ -277,4 +299,3 @@ See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more inform
 ## License:
 
 This library is licensed under the MIT-0 License. See the LICENSE file.
-

@@ -43,7 +43,7 @@
                 "ecr:GetRepositoryPolicy",
                 "ecr:GetLifecyclePolicy"
             ],
-            "Resource": "arn:aws:ecr:*:<ACCOUNT-ID>:repository/*"
+            "Resource": "arn:aws:ecr:*:694960378303:repository/*"
         },
         {
             "Sid": "LambdaLayerSpecific",
@@ -59,8 +59,8 @@
             ],
             "Resource": [
                 "arn:aws:lambda:*::function:*:*",
-                "arn:aws:lambda:*:<ACCOUNT-ID>:event-source-mapping:*",
-                "arn:aws:lambda:*:<ACCOUNT-ID>:layer:*:*"
+                "arn:aws:lambda:*:694960378303:event-source-mapping:*",
+                "arn:aws:lambda:*:694960378303:layer:*:*"
             ]
         },
         {
@@ -87,8 +87,8 @@
                 "lambda:GetPolicy"
             ],
             "Resource": [
-                "arn:aws:lambda:*:<ACCOUNT-ID>:layer:*",
-                "arn:aws:lambda:*:<ACCOUNT-ID>:function:*"
+                "arn:aws:lambda:*:694960378303:layer:*",
+                "arn:aws:lambda:*:694960378303:function:*"
             ]
         }
     ]
